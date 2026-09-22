@@ -70,8 +70,8 @@ cli.py            ← 唯一与人对话的模块
 
 ### 5. 凭据来源显式化
 
-`config.py` 会从 `~/.codex/config.toml` 复用 Codex 已配置的 provider 凭据（本机上现成可用）。
-但必须在 stderr 打印一行**来源**（`credential=...`），且永远不打印密钥本身。
+`config.py` 从项目自己的 `.xagent/config.toml` 取凭据（格式仿照 Codex 的 `config.toml`）。
+必须在 stderr 打印一行**来源**（`credential=...`），且永远不打印密钥本身。
 便利性和可审计性不冲突，只要把来源说出来。
 
 ## 验证
@@ -159,3 +159,32 @@ REPL 不崩、历史已回滚、可以继续输入。
 
 边界：**运行时依赖仍然是零**。pytest 只在开发期需要，且不参与 `python -m xagent` 的运行路径。
 这一点是刻意的 —— 想保持「clone 下来不装任何东西就能跑」。
+
+### 2026-09-22：配置来源改为项目自有的 `.xagent/config.toml`
+
+起因：原先凭据是从 `~/.codex/config.toml` 复用 Codex 的 provider 块。这有两个问题：
+一是「读别人的配置文件」隐式耦合到一个外部工具，用户改了 Codex 配置这里就会跟着变；
+二是别人 clone 这个仓库时既没有那个文件也不该去读它。要求改成项目自己持有配置。
+
+改动：
+
+- 新增 `.xagent/config.toml`（**已 gitignore**，含真实密钥，权限 0600）与
+  `.xagent/config.toml.example`（提交的模板）。格式仿照 Codex：顶层 `model_provider` / `model` /
+  `temperature` / `max_tokens` / `timeout`，每厂商一个 `[model_providers.<名字>]` 块。
+  唯一的字段改名：`experimental_bearer_token` → `api_key`。
+- `xagent/config.py` 重写：删掉 `load_codex_credential`，新增 `load_config_file` / `FileConfig` /
+  `ProviderConfig`。路径由 `Path(__file__).parent.parent / ".xagent/config.toml"` 推导，
+  **不依赖当前工作目录**（实测在 `/tmp` 下运行仍能找到项目配置）。可用 `XAGENT_CONFIG` 覆盖。
+- 优先级统一成 **CLI flag > 环境变量 > 配置文件 > 内置默认**，每一项独立生效。
+
+两个刻意选择的错误行为（都做了测试）：
+
+1. **TOML 语法错要报错，而不是静默忽略**。静默会让「配置写了但不生效」变成靠猜的调试题。
+2. **`model_provider` 指向文件里不存在的 provider 要报错**。这正是 `deepseel` 这种拼写错误
+   最容易埋掉的地方 —— 不报错的话它会静默回退到内置默认，行为诡异且难查。
+
+未复制内部 `mtcode` 代理：它只提供 Anthropic 系模型，且 `/chat/completions` 返回 500
+（走的是别的协议），当前客户端连不上。写进配置只会制造一个坏掉的 provider 块。
+
+结果：用例数 35 → 45；真实 API 多轮对话验证通过，凭据来源显示
+`credential=/home/xtyi/proj/xagent/.xagent/config.toml [deepseek]`。

@@ -16,7 +16,7 @@ cd /home/xtyi/proj/xagent
 # 离线跑通（不需要 key、不联网）
 python3 -m xagent --mock
 
-# 真实后端（默认 DeepSeek 官方 API；凭据自动从 ~/.codex/config.toml 复用）
+# 真实后端（默认 DeepSeek 官方 API；密钥来自 .xagent/config.toml）
 python3 -m xagent
 python3 -m xagent --show-reasoning
 python3 -m xagent --no-stream --once "Reply with exactly: pong"
@@ -36,6 +36,26 @@ REPL 命令：`/help`、`/reset`、`/usage`、`/reasoning`、`/exit`。
 测试放在 `tests/`，按被测的层分文件：`test_sse.py`（传输解析）、`test_messages.py`（wire 编码）、
 `test_agent.py`（循环与回滚）、`test_config.py`（凭据优先级）。
 
+## 配置
+
+配置在 [`.xagent/config.toml`](.xagent/config.toml.example)，格式仿照 Codex 的 `config.toml`：
+顶层写 `model_provider` / `model` / `temperature` / `max_tokens` / `timeout`，每个厂商一个
+`[model_providers.<名字>]` 块写 `name` / `base_url` / `api_key`。
+
+```bash
+cp .xagent/config.toml.example .xagent/config.toml   # 然后填 api_key
+```
+
+`.xagent/config.toml` 含密钥，已被 gitignore（仓库里只有 `.example`）。优先级是
+**CLI flag > 环境变量 > 配置文件 > 内置默认**，所以临时换密钥不用改文件：
+
+```bash
+XAGENT_API_KEY=sk-... python3 -m xagent        # 临时覆盖
+python3 -m xagent --model deepseek-v4-pro      # 临时换模型
+```
+
+配置文件按**项目根目录**定位（由 `xagent/config.py` 的 `__file__` 推导），所以在哪个目录下运行都能找到。
+
 ## 代码地图（按阅读顺序）
 
 | 文件 | 层 | 职责 |
@@ -54,3 +74,5 @@ REPL 命令：`/help`、`/reset`、`/usage`、`/reasoning`、`/exit`。
 ## 已知的环境约束
 
 DeepSeek 的模型是 thinking 模型：多轮对话必须把上一轮 assistant 的 `reasoning_content` 原样传回，否则 HTTP 400。实测记录见 [probes/000-backend-capabilities.md](probes/000-backend-capabilities.md)。
+
+内部的 `mtcode` 代理没有复制进配置：它只提供 Anthropic 系模型，且 `/chat/completions` 返回 500（走的是别的协议），当前客户端连不上。原因同样记在 `probes/000`。

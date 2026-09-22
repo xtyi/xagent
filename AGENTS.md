@@ -62,6 +62,7 @@
 - 新行为都要有对应测试；测试用 `pytest`，写惯用 pytest 风格（模块级函数 + 裸 `assert` +
   `parametrize` / `monkeypatch` / `tmp_path`），不要写 `unittest.TestCase`。
 - 测试必须离线可跑。真实 API 的探测放 `probes/`，不进 `tests/`。
+- **绝不提交密钥**：含密文件一律进 `.gitignore`，仓库里只放 `.example` 模板。
 
 ## 6. 记录约定
 
@@ -79,8 +80,13 @@
   - 新依赖装到 conda base。
 - 运行时核心代码零第三方依赖，所以 `python -m xagent` 用哪个解释器都能跑；只有测试需要 conda base。
 - 默认后端：DeepSeek 官方 API（OpenAI 兼容 `/chat/completions`），默认模型 `deepseek-flash`。
-  - 凭据优先级：`--api-key` > `XAGENT_API_KEY` > `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` > `~/.codex/config.toml`。
-  - 从 `~/.codex/config.toml` 取用凭据时，必须往 stderr 打一行来源提示（不打印密钥本身）。
+- **配置只从项目自己的 `.xagent/config.toml` 读**，不依赖任何外部工具的配置。该文件含密钥，
+  已被 gitignore；仓库里只提交 `.xagent/config.toml.example` 模板。
+  - 优先级（每项独立生效）：CLI flag > 环境变量 > `.xagent/config.toml` > 内置默认。
+  - 环境变量：`XAGENT_API_KEY` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`、`XAGENT_BASE_URL`、
+    `XAGENT_MODEL`、`XAGENT_PROVIDER`、`XAGENT_CONFIG`（指向别的配置文件）。
+  - 必须往 stderr 打一行凭据**来源**提示，且永远不打印密钥本身。
+  - 加配置项要同时改三处：`.xagent/config.toml.example`、`load_config_file`、`tests/test_config.py`。
 - 该后端是 **thinking 模型**：多轮时上一层 assistant 的 `reasoning_content` 必须原样回传，否则 400。见 `probes/000-backend-capabilities.md`。
 - 真实 API 调用需要网络；离线验证一律走 `backends/mock.py`。
 

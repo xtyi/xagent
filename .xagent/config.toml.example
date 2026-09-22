@@ -1,0 +1,34 @@
+# xagent configuration.
+#
+# Copy to `.xagent/config.toml` and fill in your key:
+#     cp .xagent/config.toml.example .xagent/config.toml
+#
+# `.xagent/config.toml` is gitignored because it holds a secret; only this
+# example file is tracked.
+#
+# The shape is modeled on Codex's `~/.codex/config.toml` so a provider block
+# can be copied over almost as-is. One deliberate rename:
+#     experimental_bearer_token  ->  api_key
+# (`experimental_` is Codex telling you the key may be renamed again; ours is
+# ours to name.)
+#
+# Resolution order per setting, first hit wins:
+#     CLI flag  >  environment variable  >  this file  >  built-in default
+
+model_provider = "deepseek"
+model = "deepseek-flash"
+temperature = 0.0
+max_tokens = 2048
+timeout = 120.0
+
+[model_providers.deepseek]
+name = "deepseek"
+base_url = "https://api.deepseek.com/v1"
+api_key = "sk-REPLACE-ME"
+
+# To add another provider, add a block and point `model_provider` at it:
+#
+# [model_providers.openai]
+# name = "openai"
+# base_url = "https://api.openai.com/v1"
+# api_key = "sk-..."
