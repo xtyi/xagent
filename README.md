@@ -21,11 +21,20 @@ python3 -m xagent
 python3 -m xagent --show-reasoning
 python3 -m xagent --no-stream --once "Reply with exactly: pong"
 
-# 测试（离线，22 个用例）
-python3 -m unittest discover -s tests -t . -v
+# 测试（离线，35 个用例）—— 用 conda base，pytest 装在那里
+conda run -n base python -m pytest -q
 ```
 
 REPL 命令：`/help`、`/reset`、`/usage`、`/reasoning`、`/exit`。
+
+## 依赖
+
+运行时**零第三方依赖**，只用标准库 —— 所以 `python -m xagent` 用系统 `python3` 也能跑。
+测试用 `pytest`（装在 conda base）。配置在 [pyproject.toml](pyproject.toml)，目前只含 pytest 配置，
+项目还没做打包（不需要 `pip install`，从仓库根目录运行即可）。
+
+测试放在 `tests/`，按被测的层分文件：`test_sse.py`（传输解析）、`test_messages.py`（wire 编码）、
+`test_agent.py`（循环与回滚）、`test_config.py`（凭据优先级）。
 
 ## 代码地图（按阅读顺序）
 

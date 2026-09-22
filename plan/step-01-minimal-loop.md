@@ -79,9 +79,8 @@ cli.py            ← 唯一与人对话的模块
 ### 离线（可重复，无网络）
 
 ```
-$ python3 -m unittest discover -s tests -t . 
-Ran 22 tests in 0.001s
-OK
+$ conda run -n base python -m pytest -q
+35 passed in 0.06s
 
 $ printf '/help\nhello there\n/exit\n' | python3 -m xagent --mock
 [config] backend=mock (offline, no network)
@@ -91,8 +90,9 @@ you> xagent> echo: hello there
 [tokens: 0 in / 0 out]
 ```
 
-测试覆盖：SSE 解析（多行 data、注释行、`[DONE]`）、chunk→event 翻译、`to_wire` 的
-`reasoning_content` 规则、循环的 history 形态、跨轮次回传 reasoning、失败回滚。
+测试覆盖：SSE 解析（多行 data、注释行、`[DONE]`、CRLF、未闭合尾事件）、chunk→event 翻译、
+`to_wire` 的 `reasoning_content` 规则、循环的 history 形态、跨轮次回传 reasoning、
+失败回滚、`MockBackend.echo`、凭据优先级与 base_url 归一化。
 
 ### 真实 API（`deepseek-flash`，实测通过）
 
@@ -137,3 +137,25 @@ REPL 不崩、历史已回滚、可以继续输入。
 2. Step 5：系统提示词与工作区上下文 —— 便宜且立刻提升可用性，但没工具时 agent 也没事可做，优先级低一些。
 3. Step 6：上下文管理 —— 现在每轮全量重发，长对话迟早出问题，但还很远。
 4. Step 7：会话持久化 —— 独立性强，哪天想脱离终端也行，但不推进核心理解。
+
+## 变更记录
+
+### 2026-09-22：测试框架 unittest → pytest
+
+起因：确认常见第三方库可以用，要求把测试方式改成 pytest，依赖装进 conda base。
+
+改动：
+
+- `tests/` 三个文件重写为惯用 pytest 风格（模块级函数 + 裸 `assert` +
+  `parametrize` / `monkeypatch` / `tmp_path`），删掉 `tests/__init__.py`（不再把 tests 当包）。
+- 新增 `pyproject.toml` 承载 pytest 配置（`testpaths` + `pythonpath = ["."]`），
+  这样不装包也能 `import xagent`。未配置打包，也没做 `pip install -e .`。
+- 新增 `tests/test_config.py`，把此前完全没有测试的 config 层补上（凭据优先级、`/v1` 归一化、
+  `ConfigError` 路径），顺带作为 `monkeypatch` / `tmp_path` 的示例。
+- AGENTS.md 第 5、7 节同步：测试约定改为 pytest；环境事实写清「测试用 conda base 的
+  `/home/xtyi/miniforge3/bin/python`，PATH 里的系统 `python3` 没有 pytest」。
+
+结果：用例数 22 → 35（parametrize 展开 + config 层新增），全部离线通过。
+
+边界：**运行时依赖仍然是零**。pytest 只在开发期需要，且不参与 `python -m xagent` 的运行路径。
+这一点是刻意的 —— 想保持「clone 下来不装任何东西就能跑」。

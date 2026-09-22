@@ -3,7 +3,7 @@
 Everything here runs against MockBackend, so the suite needs no network.
 """
 
-import unittest
+import pytest
 
 from xagent.agent import Agent
 from xagent.backends.base import ModelParams, StreamEvent
@@ -13,77 +13,89 @@ from xagent.messages import Conversation
 PARAMS = ModelParams(model="mock")
 
 
-def scripted(*turns):
-    return MockBackend(responses=turns)
+def text(value: str) -> StreamEvent:
+    return StreamEvent(kind="text", text=value)
 
 
-class TestAgentTurn(unittest.TestCase):
-    def test_one_turn_appends_user_then_assistant(self):
-        backend = scripted(
+def test_one_turn_appends_user_then_assistant():
+    backend = MockBackend(
+        responses=[
             [
                 StreamEvent(kind="reasoning", text="because"),
-                StreamEvent(kind="text", text="hello"),
-                StreamEvent(kind="text", text=" world"),
+                text("hello"),
+                text(" world"),
             ]
-        )
-        agent = Agent(backend, PARAMS, Conversation.with_system_prompt("sys"))
+        ]
+    )
+    agent = Agent(backend, PARAMS, Conversation.with_system_prompt("sys"))
 
-        reply = agent.send("hi")
+    reply = agent.send("hi")
 
-        self.assertEqual(reply.content, "hello world")
-        self.assertEqual(reply.reasoning_content, "because")
-        self.assertEqual(
-            [(m.role, m.content) for m in agent.conversation],
-            [("system", "sys"), ("user", "hi"), ("assistant", "hello world")],
-        )
+    assert reply.content == "hello world"
+    assert reply.reasoning_content == "because"
+    assert [(message.role, message.content) for message in agent.conversation] == [
+        ("system", "sys"),
+        ("user", "hi"),
+        ("assistant", "hello world"),
+    ]
 
-    def test_usage_event_is_recorded(self):
-        backend = scripted([StreamEvent(kind="usage", usage={"prompt_tokens": 3})])
-        agent = Agent(backend, PARAMS, Conversation())
+
+def test_usage_event_is_recorded():
+    backend = MockBackend(
+        responses=[[StreamEvent(kind="usage", usage={"prompt_tokens": 3})]]
+    )
+    agent = Agent(backend, PARAMS, Conversation())
+
+    agent.send("hi")
+
+    assert agent.last_usage == {"prompt_tokens": 3}
+
+
+def test_events_are_forwarded_to_the_renderer_hook():
+    backend = MockBackend(responses=[[text("a"), text("b")]])
+    agent = Agent(backend, PARAMS, Conversation())
+    seen = []
+
+    agent.send("hi", seen.append)
+
+    assert [event.text for event in seen] == ["a", "b"]
+
+
+def test_second_turn_replays_previous_reasoning_to_the_backend():
+    """The DeepSeek thinking-mode constraint, verified at the loop level."""
+    backend = MockBackend(
+        responses=[
+            [StreamEvent(kind="reasoning", text="I will say hi."), text("hi")],
+            [text("again")],
+        ]
+    )
+    agent = Agent(backend, PARAMS, Conversation())
+
+    agent.send("hello")
+    agent.send("say it again")
+
+    assistant_messages = [
+        message for message in backend.requests[1] if message["role"] == "assistant"
+    ]
+    assert assistant_messages[0]["reasoning_content"] == "I will say hi."
+
+
+def test_echo_backend_answers_with_the_last_user_message():
+    agent = Agent(MockBackend.echo(), PARAMS, Conversation())
+    assert agent.send("ping").content == "echo: ping"
+
+
+def test_rollback_discards_a_failed_turn():
+    class ExplodingBackend:
+        def stream(self, messages, params):
+            yield text("partial")
+            raise RuntimeError("connection dropped")
+
+    agent = Agent(ExplodingBackend(), PARAMS, Conversation.with_system_prompt("sys"))
+    checkpoint = agent.checkpoint()
+
+    with pytest.raises(RuntimeError, match="connection dropped"):
         agent.send("hi")
-        self.assertEqual(agent.last_usage, {"prompt_tokens": 3})
 
-    def test_events_are_forwarded_to_the_renderer_hook(self):
-        backend = scripted(
-            [StreamEvent(kind="text", text="a"), StreamEvent(kind="text", text="b")]
-        )
-        agent = Agent(backend, PARAMS, Conversation())
-        seen = []
-        agent.send("hi", seen.append)
-        self.assertEqual([e.text for e in seen], ["a", "b"])
-
-    def test_second_turn_replays_previous_reasoning_to_the_backend(self):
-        """The DeepSeek thinking-mode constraint, verified at the loop level."""
-        backend = scripted(
-            [
-                StreamEvent(kind="reasoning", text="I will say hi."),
-                StreamEvent(kind="text", text="hi"),
-            ],
-            [StreamEvent(kind="text", text="again")],
-        )
-        agent = Agent(backend, PARAMS, Conversation())
-        agent.send("hello")
-        agent.send("say it again")
-
-        second_request = backend.requests[1]
-        assistant_messages = [m for m in second_request if m["role"] == "assistant"]
-        self.assertEqual(assistant_messages[0]["reasoning_content"], "I will say hi.")
-
-
-class TestTransactionalTurn(unittest.TestCase):
-    def test_rollback_discards_a_failed_turn(self):
-        class ExplodingBackend:
-            def stream(self, messages, params):
-                yield StreamEvent(kind="text", text="partial")
-                raise RuntimeError("connection dropped")
-
-        agent = Agent(ExplodingBackend(), PARAMS, Conversation.with_system_prompt("sys"))
-        checkpoint = agent.checkpoint()
-        with self.assertRaises(RuntimeError):
-            agent.send("hi")
-        agent.rollback(checkpoint)
-        self.assertEqual([m.role for m in agent.conversation], ["system"])
-
-
-if __name__ == "__main__":
-    unittest.main()
+    agent.rollback(checkpoint)
+    assert [message.role for message in agent.conversation] == ["system"]

@@ -1,9 +1,9 @@
 """Transport-layer tests: SSE parsing and chunk -> event translation.
 
-These are pure-function tests: no sockets, no threads, no sleeping.
+Pure functions only: no sockets, no threads, no sleeping.
 """
 
-import unittest
+import pytest
 
 from xagent.backends.openai_compat import (
     chunk_to_events,
@@ -13,66 +13,77 @@ from xagent.backends.openai_compat import (
 )
 
 
-class TestIterSSEPayloads(unittest.TestCase):
-    def test_single_line_events(self):
-        lines = [b'data: {"a": 1}\n', b"\n", b'data: {"a": 2}\n', b"\n"]
-        self.assertEqual(list(iter_sse_payloads(lines)), ['{"a": 1}', '{"a": 2}'])
-
-    def test_ignores_comments_and_other_fields(self):
-        lines = [b": keep-alive\n", b"event: message\n", b"data: hello\n", b"\n"]
-        self.assertEqual(list(iter_sse_payloads(lines)), ["hello"])
-
-    def test_joins_multiline_data(self):
-        lines = [b"data: part1\n", b"data: part2\n", b"\n"]
-        self.assertEqual(list(iter_sse_payloads(lines)), ["part1\npart2"])
-
-    def test_handles_carriage_returns_and_str_input(self):
-        lines = ["data: x\r\n", "\r\n"]
-        self.assertEqual(list(iter_sse_payloads(lines)), ["x"])
-
-    def test_trailing_event_without_blank_line(self):
-        self.assertEqual(list(iter_sse_payloads([b"data: tail\n"])), ["tail"])
-
-
-class TestParseChunks(unittest.TestCase):
-    def test_stops_at_done_sentinel(self):
-        lines = [b'data: {"i": 1}\n', b"\n", b"data: [DONE]\n", b"\n", b'data: {"i": 2}\n']
-        self.assertEqual([c["i"] for c in parse_chunks(lines)], [1])
-
-    def test_skips_empty_payloads(self):
-        lines = [b"data:\n", b"\n", b'data: {"i": 3}\n', b"\n"]
-        self.assertEqual([c["i"] for c in parse_chunks(lines)], [3])
+@pytest.mark.parametrize(
+    ("lines", "expected"),
+    [
+        pytest.param(
+            [b'data: {"a": 1}\n', b"\n", b'data: {"a": 2}\n', b"\n"],
+            ['{"a": 1}', '{"a": 2}'],
+            id="two-single-line-events",
+        ),
+        pytest.param(
+            [b": keep-alive\n", b"event: message\n", b"data: hello\n", b"\n"],
+            ["hello"],
+            id="drops-comments-and-non-data-fields",
+        ),
+        pytest.param(
+            [b"data: part1\n", b"data: part2\n", b"\n"],
+            ["part1\npart2"],
+            id="joins-multiline-data",
+        ),
+        pytest.param(["data: x\r\n", "\r\n"], ["x"], id="accepts-crlf-and-str"),
+        pytest.param([b"data: tail\n"], ["tail"], id="keeps-unterminated-final-event"),
+    ],
+)
+def test_iter_sse_payloads(lines, expected):
+    assert list(iter_sse_payloads(lines)) == expected
 
 
-class TestChunkToEvents(unittest.TestCase):
-    def test_reasoning_and_text_are_separate_events(self):
-        chunk = {"choices": [{"delta": {"reasoning_content": "think", "content": "say"}}]}
-        events = list(chunk_to_events(chunk))
-        self.assertEqual([(e.kind, e.text) for e in events], [("reasoning", "think"), ("text", "say")])
-
-    def test_null_fields_produce_no_events(self):
-        chunk = {"choices": [{"delta": {"reasoning_content": None, "content": None}}]}
-        self.assertEqual(list(chunk_to_events(chunk)), [])
-
-    def test_usage_chunk_emits_usage_event(self):
-        chunk = {"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 7}}
-        events = list(chunk_to_events(chunk))
-        self.assertEqual(len(events), 1)
-        self.assertEqual(events[0].kind, "usage")
-        self.assertEqual(events[0].usage["completion_tokens"], 7)
+def test_parse_chunks_stops_at_done_sentinel():
+    lines = [b'data: {"i": 1}\n', b"\n", b"data: [DONE]\n", b"\n", b'data: {"i": 2}\n']
+    assert [chunk["i"] for chunk in parse_chunks(lines)] == [1]
 
 
-class TestResponseToEvents(unittest.TestCase):
-    def test_non_streaming_response_maps_to_same_events(self):
-        body = {
-            "choices": [{"message": {"content": "hi", "reasoning_content": "hmm"}}],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 2},
-        }
-        self.assertEqual(
-            [e.kind for e in response_to_events(body)],
-            ["reasoning", "text", "usage"],
-        )
+def test_parse_chunks_skips_empty_payloads():
+    lines = [b"data:\n", b"\n", b'data: {"i": 3}\n', b"\n"]
+    assert [chunk["i"] for chunk in parse_chunks(lines)] == [3]
 
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.mark.parametrize(
+    ("delta", "expected"),
+    [
+        pytest.param(
+            {"reasoning_content": "think", "content": "say"},
+            [("reasoning", "think"), ("text", "say")],
+            id="reasoning-and-text-are-separate-events",
+        ),
+        pytest.param(
+            {"reasoning_content": None, "content": None},
+            [],
+            id="null-fields-produce-no-events",
+        ),
+        pytest.param({"content": "only"}, [("text", "only")], id="text-only-delta"),
+    ],
+)
+def test_chunk_to_events_maps_deltas(delta, expected):
+    chunk = {"choices": [{"delta": delta}]}
+    assert [(event.kind, event.text) for event in chunk_to_events(chunk)] == expected
+
+
+def test_usage_only_chunk_emits_usage_event():
+    chunk = {"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 7}}
+    events = list(chunk_to_events(chunk))
+    assert [event.kind for event in events] == ["usage"]
+    assert events[0].usage["completion_tokens"] == 7
+
+
+def test_non_streaming_response_maps_to_the_same_events():
+    body = {
+        "choices": [{"message": {"content": "hi", "reasoning_content": "hmm"}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 2},
+    }
+    assert [event.kind for event in response_to_events(body)] == [
+        "reasoning",
+        "text",
+        "usage",
+    ]

@@ -1,0 +1,11 @@
+# Tool configuration only.
+#
+# This project is not packaged yet: it runs from the repo root via
+# `python -m xagent`. Adding `[project]` / `[build-system]` (and verifying an
+# editable install) is deliberately deferred until there is a reason for it.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Tests live in tests/ (not a package), so the repo root must be importable
+# for `import xagent` to resolve without installing anything.
+pythonpath = ["."]

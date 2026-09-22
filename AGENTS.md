@@ -1,14 +1,10 @@
 # AGENTS.md
 
-本文件是本仓库的协作约定。任何人（包括 AI agent）在改动本仓库之前，先读完这一页。
-
-## 1. 项目定位
+## 项目定位
 
 `xagent` 是一个**从零实现、面向学习**的 code agent。
 
 目标不是做一个能替代 Codex / Claude Code 的生产工具，而是把这类工具**为什么这么设计、内部究竟在做什么**一层层拆开，每一层都用读得懂、跑得起来、验得了的代码实现一遍。
-
-阅读对象：已经会写代码、想理解 agent 内部机制的工程师。
 
 因此本项目的取舍与产品项目几乎相反：
 
@@ -21,7 +17,7 @@
 | 变更方式 | 小步、可讲、可回退 | 大步、追求吞吐 |
 | 讲解 | 每个特性必须配讲解 | 不需要 |
 
-## 2. 与真实 agent 的对照
+## 与真实 agent 的对照
 
 我们实现的概念在真实工具里的位置（随时用它校准「我们在学什么」）：
 
@@ -34,13 +30,13 @@
 | `policy/`（后续） | sandbox + approval | permission modes | 权限与安全边界 |
 | `ui.py` | TUI | TUI | 流式渲染与人机交互 |
 
-## 3. 工作方式：一次一个 step
+## 工作方式：一次一个 step
 
 **每一次改动 = 一个 step。** 每个 step 必须同时交付四件事，缺一不算完成：
 
 1. **代码**：能运行的最小增量，只加这一个特性。
 2. **讲解**：说清「这段代码在做什么」「为什么这样设计」「对应真实工具里的哪一部分」。讲代码时指向具体文件与行，不要泛泛而谈。
-3. **验证**：给出可复现的验证方式（`unittest` 通过 + 至少一条真实跑通的命令），并显式说明哪些**没有**验证。
+3. **验证**：给出可复现的验证方式（`pytest` 通过 + 至少一条真实跑通的命令），并显式说明哪些**没有**验证。
 4. **下一步建议**：给 2–4 个候选方向 + 推荐哪个 + 为什么，而不是替用户做决定。
 
 ## 4. 分层边界
@@ -59,10 +55,12 @@
 ## 5. 代码约定
 
 - 语言：**讲解、commit message 用中文；标识符、日志、代码内注释用英文。**
-- Python ≥ 3.12，核心代码**只用标准库**。新增第三方依赖必须先在 `plan/` 里写清理由。
+- Python ≥ 3.12。**运行时代码尽量只用标准库**；开发/测试工具（pytest 这类常见库）允许直接用。
+  新增**运行时**第三方依赖必须先在 `plan/` 里写清理由。
 - 类型标注齐全，数据结构优先用 `dataclass`。
 - 不做「以后可能用到」的抽象；同一模式第三次出现时再抽。
-- 新行为都要有对应测试；测试用标准库 `unittest`，不引入 pytest。
+- 新行为都要有对应测试；测试用 `pytest`，写惯用 pytest 风格（模块级函数 + 裸 `assert` +
+  `parametrize` / `monkeypatch` / `tmp_path`），不要写 `unittest.TestCase`。
 - 测试必须离线可跑。真实 API 的探测放 `probes/`，不进 `tests/`。
 
 ## 6. 记录约定
@@ -75,7 +73,11 @@
 ## 7. 环境事实
 
 - 工作目录：`/home/xtyi/proj/xagent`
-- Python 3.12.3；无 pytest、无 uv，用标准库 + system pip。
+- **解释器用 conda base**：`/home/xtyi/miniforge3/bin/python`（Python 3.12.11）。
+  PATH 里的 `python3` 是系统 Python（`/usr/bin/python3`，3.12.3），**没有 pytest**，不要拿它跑测试。
+  - 跑测试：`conda run -n base python -m pytest -q`（或 `conda activate base` 后 `python -m pytest -q`）。
+  - 新依赖装到 conda base。
+- 运行时核心代码零第三方依赖，所以 `python -m xagent` 用哪个解释器都能跑；只有测试需要 conda base。
 - 默认后端：DeepSeek 官方 API（OpenAI 兼容 `/chat/completions`），默认模型 `deepseek-flash`。
   - 凭据优先级：`--api-key` > `XAGENT_API_KEY` > `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` > `~/.codex/config.toml`。
   - 从 `~/.codex/config.toml` 取用凭据时，必须往 stderr 打一行来源提示（不打印密钥本身）。
