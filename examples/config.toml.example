@@ -1,10 +1,15 @@
-# xagent configuration.
+# xagent configuration -- copy to ~/.xagent/config.toml
 #
-# Copy to `.xagent/config.toml` and fill in your key:
-#     cp .xagent/config.toml.example .xagent/config.toml
+# This file is documentation: it shows the shape of the user-level config that
+# `xagent/config.py` reads. To set one up:
 #
-# `.xagent/config.toml` is gitignored because it holds a secret; only this
-# example file is tracked.
+#     mkdir -p ~/.xagent
+#     cp examples/config.toml.example ~/.xagent/config.toml
+#     # then fill in api_key
+#
+# `~/.xagent/` sits next to `~/.codex/`, and like `~/.codex/config.toml` it is
+# user-level: one per machine, not per checkout. It lives outside the repo, so
+# a key in it can never be committed.
 #
 # The shape is modeled on Codex's `~/.codex/config.toml` so a provider block
 # can be copied over almost as-is. One deliberate rename:

@@ -4,4 +4,6 @@ __pycache__/
 sessions/
 .pytest_cache/
 *.egg-info/
-.xagent/config.toml
+# safety net: the real config lives in ~/.xagent/, this catches an accidental
+# in-repo copy of it
+.xagent/

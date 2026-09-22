@@ -6,11 +6,12 @@ module is the one place that knows about TOML and `os.environ`.
 
 Resolution order, per setting (first hit wins):
 
-    CLI flag  >  environment variable  >  .xagent/config.toml  >  built-in default
+    CLI flag  >  environment variable  >  ~/.xagent/config.toml  >  built-in default
 
-The config file lives in the repo and is modeled on Codex's `config.toml`, so
-provider blocks can be copied over nearly as-is. It holds an API key, so it is
-**gitignored** -- only `.xagent/config.toml.example` is committed.
+The config file is **user-level**, next to Codex's own: `~/.xagent/config.toml`.
+It is modeled on `~/.codex/config.toml` so provider blocks can be copied over
+nearly as-is. Because it sits outside the repo it can never be committed; the
+repo only carries `examples/config.toml.example` as documentation.
 """
 
 from __future__ import annotations
@@ -20,10 +21,11 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# `xagent/config.py` -> `xagent/` -> repo root, so the config file is found
-# regardless of the current working directory.
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_PATH = PROJECT_ROOT / ".xagent" / "config.toml"
+# User-level, like `~/.codex`: one config per machine, not per checkout. A
+# directory rather than a single file because later steps will want siblings
+# (Step 7 session transcripts, for instance).
+CONFIG_DIR = Path.home() / ".xagent"
+CONFIG_PATH = CONFIG_DIR / "config.toml"
 
 DEFAULT_PROVIDER = "deepseek"
 DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
@@ -66,7 +68,7 @@ class ProviderConfig:
 
 @dataclass(frozen=True)
 class FileConfig:
-    """What `.xagent/config.toml` may say. Absent keys stay `None`."""
+    """What `~/.xagent/config.toml` may say. Absent keys stay `None`."""
 
     model_provider: str | None = None
     model: str | None = None
@@ -90,7 +92,7 @@ def normalize_base_url(base: str) -> str:
 
 
 def load_config_file(path: Path = CONFIG_PATH) -> FileConfig:
-    """Parse `.xagent/config.toml`. A missing file yields an empty config.
+    """Parse `~/.xagent/config.toml`. A missing file yields an empty config.
 
     A *malformed* file is an error rather than a silent skip: a typo in a
     config file should be loud, not something you debug by wondering why your

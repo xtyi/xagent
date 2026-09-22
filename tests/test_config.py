@@ -3,14 +3,17 @@
 Also a tour of two pytest fixtures worth knowing: `monkeypatch` for environment
 variables and `tmp_path` for throwaway files.
 
-No test reads the real `.xagent/config.toml`: each one passes an explicit
+No test reads the real `~/.xagent/config.toml`: each one passes an explicit
 `config_path` (or sets `XAGENT_CONFIG`), so the suite does not depend on
 whatever key happens to be on this machine.
 """
 
+from pathlib import Path
+
 import pytest
 
 from xagent.config import (
+    CONFIG_DIR,
     CONFIG_PATH,
     ConfigError,
     FileConfig,
@@ -87,8 +90,9 @@ def test_normalize_base_url(raw, expected):
     assert normalize_base_url(raw) == expected
 
 
-def test_config_path_is_project_local():
-    assert CONFIG_PATH.parts[-2:] == (".xagent", "config.toml")
+def test_default_config_path_lives_in_the_home_directory():
+    assert CONFIG_DIR == Path.home() / ".xagent"
+    assert CONFIG_PATH == CONFIG_DIR / "config.toml"
 
 
 def test_missing_file_is_an_empty_config(absent_file):

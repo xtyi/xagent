@@ -70,7 +70,7 @@ cli.py            ← 唯一与人对话的模块
 
 ### 5. 凭据来源显式化
 
-`config.py` 从项目自己的 `.xagent/config.toml` 取凭据（格式仿照 Codex 的 `config.toml`）。
+`config.py` 从用户级的 `~/.xagent/config.toml` 取凭据（与 `~/.codex` 平级）。
 必须在 stderr 打印一行**来源**（`credential=...`），且永远不打印密钥本身。
 便利性和可审计性不冲突，只要把来源说出来。
 
@@ -188,3 +188,33 @@ REPL 不崩、历史已回滚、可以继续输入。
 
 结果：用例数 35 → 45；真实 API 多轮对话验证通过，凭据来源显示
 `credential=/home/xtyi/proj/xagent/.xagent/config.toml [deepseek]`。
+
+### 2026-09-22：配置位置从仓库内改到 `~/.xagent/`（取代上一条的位置选择）
+
+起因：上一条把 `.xagent/` 放在**仓库根目录**，但配置是用户级的东西（一台机器一份），
+不是 checkout 级的东西。要求改成和 `.codex` 一样放在 `$HOME` 下。
+
+这个改动比换个路径更大，它消掉了一整类风险：
+
+1. **密钥物理上不可能被提交**。文件在仓库外，不再依赖 `.gitignore` 生效 ——
+   也不用再担心 `git add -f`、打包、或者别人把仓库复制到别处时把密钥带走。
+   上一条为此专门做的「暂存区扫描」验证，现在变成结构性保证。
+2. **不再需要 `__file__` 推导项目根目录**。上一条用 `Path(__file__).parent.parent`
+   来保证「换 cwd 也能找到配置」，现在 `Path.home()` 直接给出答案，少一层推理。
+
+改动：
+
+- `CONFIG_DIR = Path.home() / ".xagent"`，`CONFIG_PATH = CONFIG_DIR / "config.toml"`；
+  删掉 `PROJECT_ROOT`。
+- 真实配置搬到 `~/.xagent/config.toml`（保留 0600 权限）；仓库里的模板移到
+  `examples/config.toml.example`（仓库里不再有 `.xagent/` 目录）。
+- `.gitignore` 的 `.xagent/config.toml` 放宽成 `.xagent/`，作为「仓库内误建同名目录」的兜底。
+- 测试改名 `test_default_config_path_lives_in_the_home_directory`，断言
+  `CONFIG_DIR == Path.home() / ".xagent"`。
+
+一个取舍：**目录而不是单个文件**。`~/.xagent/` 现在只有 `config.toml` 一个文件，
+看起来可以省掉目录。但 Step 7（会话持久化）会想要 `~/.xagent/sessions/`，
+和 `~/.codex/sessions` 一个道理 —— 目录是给下一步留的位置，不是过度设计。
+
+结果：用例数保持 45；真实 API 多轮验证通过，凭据来源变为
+`credential=/home/xtyi/.xagent/config.toml [deepseek]`。

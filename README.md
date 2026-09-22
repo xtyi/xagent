@@ -16,7 +16,7 @@ cd /home/xtyi/proj/xagent
 # 离线跑通（不需要 key、不联网）
 python3 -m xagent --mock
 
-# 真实后端（默认 DeepSeek 官方 API；密钥来自 .xagent/config.toml）
+# 真实后端（默认 DeepSeek 官方 API；密钥来自 ~/.xagent/config.toml）
 python3 -m xagent
 python3 -m xagent --show-reasoning
 python3 -m xagent --no-stream --once "Reply with exactly: pong"
@@ -38,23 +38,25 @@ REPL 命令：`/help`、`/reset`、`/usage`、`/reasoning`、`/exit`。
 
 ## 配置
 
-配置在 [`.xagent/config.toml`](.xagent/config.toml.example)，格式仿照 Codex 的 `config.toml`：
-顶层写 `model_provider` / `model` / `temperature` / `max_tokens` / `timeout`，每个厂商一个
-`[model_providers.<名字>]` 块写 `name` / `base_url` / `api_key`。
+配置是用户级的，和 `~/.codex` 平级：[`~/.xagent/config.toml`](examples/config.toml.example)。
+格式仿照 Codex 的 `config.toml`：顶层写 `model_provider` / `model` / `temperature` /
+`max_tokens` / `timeout`，每个厂商一个 `[model_providers.<名字>]` 块写 `name` / `base_url` / `api_key`。
 
 ```bash
-cp .xagent/config.toml.example .xagent/config.toml   # 然后填 api_key
+mkdir -p ~/.xagent
+cp examples/config.toml.example ~/.xagent/config.toml   # 然后填 api_key
 ```
 
-`.xagent/config.toml` 含密钥，已被 gitignore（仓库里只有 `.example`）。优先级是
-**CLI flag > 环境变量 > 配置文件 > 内置默认**，所以临时换密钥不用改文件：
+一台机器一份，且不在仓库里，所以密钥不可能被提交。用目录而不是单文件，是为了后面
+（Step 7 的 session 记录之类）有地方放兄弟文件。
+
+优先级是 **CLI flag > 环境变量 > 配置文件 > 内置默认**，所以临时换密钥不用改文件：
 
 ```bash
-XAGENT_API_KEY=sk-... python3 -m xagent        # 临时覆盖
-python3 -m xagent --model deepseek-v4-pro      # 临时换模型
+XAGENT_API_KEY=sk-... python3 -m xagent               # 临时覆盖密钥
+python3 -m xagent --model deepseek-v4-pro             # 临时换模型
+XAGENT_CONFIG=/path/to/other.toml python3 -m xagent   # 临时换配置文件
 ```
-
-配置文件按**项目根目录**定位（由 `xagent/config.py` 的 `__file__` 推导），所以在哪个目录下运行都能找到。
 
 ## 代码地图（按阅读顺序）
 

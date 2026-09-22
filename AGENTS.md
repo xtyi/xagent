@@ -80,13 +80,14 @@
   - 新依赖装到 conda base。
 - 运行时核心代码零第三方依赖，所以 `python -m xagent` 用哪个解释器都能跑；只有测试需要 conda base。
 - 默认后端：DeepSeek 官方 API（OpenAI 兼容 `/chat/completions`），默认模型 `deepseek-flash`。
-- **配置只从项目自己的 `.xagent/config.toml` 读**，不依赖任何外部工具的配置。该文件含密钥，
-  已被 gitignore；仓库里只提交 `.xagent/config.toml.example` 模板。
-  - 优先级（每项独立生效）：CLI flag > 环境变量 > `.xagent/config.toml` > 内置默认。
+- **配置只从用户级的 `~/.xagent/config.toml` 读**（与 `~/.codex` 平级，一台机器一份），
+  不依赖任何外部工具的配置。它不在仓库内，所以密钥不可能被提交；仓库里只有
+  `examples/config.toml.example` 作为格式文档。
+  - 优先级（每项独立生效）：CLI flag > 环境变量 > `~/.xagent/config.toml` > 内置默认。
   - 环境变量：`XAGENT_API_KEY` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`、`XAGENT_BASE_URL`、
     `XAGENT_MODEL`、`XAGENT_PROVIDER`、`XAGENT_CONFIG`（指向别的配置文件）。
   - 必须往 stderr 打一行凭据**来源**提示，且永远不打印密钥本身。
-  - 加配置项要同时改三处：`.xagent/config.toml.example`、`load_config_file`、`tests/test_config.py`。
+  - 加配置项要同时改三处：`examples/config.toml.example`、`load_config_file`、`tests/test_config.py`。
 - 该后端是 **thinking 模型**：多轮时上一层 assistant 的 `reasoning_content` 必须原样回传，否则 400。见 `probes/000-backend-capabilities.md`。
 - 真实 API 调用需要网络；离线验证一律走 `backends/mock.py`。
 
