@@ -1,0 +1,139 @@
+# Step 1：最小对话循环（流式）
+
+日期：2026-09-22
+状态：已完成并验证
+
+## 目标
+
+`python -m xagent` 能进入 REPL，输入一句话看到模型**流式**回答，并且能多轮对话。
+
+刻意不做的事：工具调用、文件读写、权限、TUI、上下文压缩、持久化。这一 step 只回答一个问题——
+**在还没有工具之前，一个 agent 的骨架是什么样？**
+
+答案：一个消息列表 + 一次 HTTP 请求 + 一个把增量拼回列表的循环。
+
+## 分层结果
+
+```
+cli.py            ← 唯一与人对话的模块
+  ├── config.py   ← 唯一读环境变量/配置文件的地方
+  ├── ui.py       ← 唯一写终端的地方
+  └── agent.py    ← 循环，不碰 HTTP、不碰终端
+        ├── messages.py            ← 唯一的 wire 编解码点
+        └── backends/
+              ├── base.py          ← 协议：只定义「事件流」的形状
+              ├── openai_compat.py ← HTTP + SSE + JSON
+              └── mock.py          ← 同一个协议的离线实现
+```
+
+依赖方向单向向下。`agent.py` 拿到的是 `StreamEvent`，交回去的是 `Message`；它不知道事件是怎么来的，
+所以把 `openai_compat` 换成 `mock` 时循环一行都不用改。
+
+## 关键设计决策
+
+### 1. 没有 SDK，手写 SSE
+
+用 `urllib` + 手写 SSE 解析（`iter_sse_payloads`），而不是 `openai` SDK。
+
+理由：SDK 把「模型通信」这一层包成一个 `client.chat()` 调用，恰好把本项目最该看清的东西藏起来了。
+手写之后能直接看到两件反直觉的事实：
+
+- **思维链和正文是两条独立的流**。delta 里同时有 `reasoning_content` 和 `content`，交替到达，
+  不是一个字段里的两部分。所以 `StreamEvent` 把 `reasoning` 和 `text` 分成两种事件，
+  UI 也分开渲染。
+- **流式和非流式只是传输层选择**。两者在 `OpenAICompatBackend.stream()` 内部收敛成同一串事件，
+  上层完全无感 —— 这就是 `--no-stream` 只是一个构造参数的原因。
+
+顺带一个细节：`stream_options.include_usage = true` 必须显式打开，否则最后一个 chunk 不带 token 计数。
+
+### 2. `StreamEvent` 里没有 "done"
+
+最初设计里有 `kind="done"`，写的时候去掉了：生成器耗尽本身就意味着「这一轮结束了」，
+多一个 done 事件只会多一个需要保持同步的状态。**能用控制流表达的东西不要用数据表达。**
+
+### 3. `Message.reasoning_content` 从第一天就要有
+
+这是被实测逼出来的，不是预留：DeepSeek 的 thinking 模型要求把上一轮 assistant 的
+`reasoning_content` 原样传回，丢掉就 400（错误原文见 `probes/000`）。
+
+`Message.to_wire()` 里那句 `if self.role == "assistant"` 就是这条约束的唯一落点。
+这正是「wire 编解码只放在一个地方」的价值：约束只写一次。
+
+### 4. 一轮对话是**事务**
+
+`Agent.checkpoint()` / `Agent.rollback()`：请求失败或用户 Ctrl-C 时，历史回退到这一轮之前，
+**失败的轮次不留痕迹**。
+
+这个选择有取舍：坏处是已经流式打印出来的半句话还在屏幕上（我们不做屏幕回滚）；
+好处是历史永远处于「要么完整、要么没有」的干净状态，不会出现一条半截的 assistant 消息被带到下一轮
+——在 thinking 模型上，半截消息缺少 `reasoning_content`，下一次请求就会直接 400。
+
+### 5. 凭据来源显式化
+
+`config.py` 会从 `~/.codex/config.toml` 复用 Codex 已配置的 provider 凭据（本机上现成可用）。
+但必须在 stderr 打印一行**来源**（`credential=...`），且永远不打印密钥本身。
+便利性和可审计性不冲突，只要把来源说出来。
+
+## 验证
+
+### 离线（可重复，无网络）
+
+```
+$ python3 -m unittest discover -s tests -t . 
+Ran 22 tests in 0.001s
+OK
+
+$ printf '/help\nhello there\n/exit\n' | python3 -m xagent --mock
+[config] backend=mock (offline, no network)
+xagent -- /help for commands, /exit to quit
+you> commands: ...
+you> xagent> echo: hello there
+[tokens: 0 in / 0 out]
+```
+
+测试覆盖：SSE 解析（多行 data、注释行、`[DONE]`）、chunk→event 翻译、`to_wire` 的
+`reasoning_content` 规则、循环的 history 形态、跨轮次回传 reasoning、失败回滚。
+
+### 真实 API（`deepseek-flash`，实测通过）
+
+多轮记忆 —— 这条同时证明了 reasoning 回传链路是通的（缺它第二跳必然 400）：
+
+```
+$ printf 'My name is Tianyi and I work on GPU compilers.\nWhat is my name and what do I work on?\n/exit\n' | python3 -m xagent
+you> xagent> Good to meet you, Tianyi. What can I help you with ...
+[tokens: 72 in / 53 out]
+you> xagent> Your name is Tianyi, and you work on GPU compilers.
+[tokens: 119 in / 51 out]
+```
+
+`--no-stream`（同一件事走非流式路径）：`xagent> pong`
+
+`--show-reasoning`（思维链流被单独渲染成 dim 文本，之后才是正文 `391`）。
+
+错误处理（故意用错 key）：
+
+```
+xagent> error: HTTP 401 from https://api.deepseek.com/v1/chat/completions: {"error":{"message":"Authentication Fails ..."}}
+```
+
+REPL 不崩、历史已回滚、可以继续输入。
+
+## 未验证 / 已知不足
+
+1. **未验证**：中断（Ctrl-C）路径只做了代码审查，没有实际按下过 Ctrl-C。
+2. **未验证**：超长上下文、长时间挂起、并发请求的行为完全没测。
+3. `--no-stream` 模式下 `reasoning_content` 与多轮的组合未单独测过（单轮验证过）。
+4. 渲染层用 ANSI 转义直接拼字符串，没有做颜色能力检测（`NO_COLOR`、非 tty 场景会输出转义码）。
+5. `input()` 的提示符里带 ANSI 码，长行编辑时 readline 的光标计算可能不准。
+6. 每轮都全量重发历史，没有任何 token 计数或裁剪 —— Step 6 才处理。
+
+## 下一步（候选）
+
+见 ROADMAP。推荐顺序与理由：
+
+1. **Step 2：工具调用协议**（推荐）—— 这是「chatbot → agent」的分水岭，也是本项目承诺要讲清楚的核心。
+   现在 `agent.py` 只有一条直线，加上工具分支后才有真正意义上的「循环」。实测依据（分片拼装、
+   `finish_reason == "tool_calls"`）已经在 `probes/000` 里拿到了。
+2. Step 5：系统提示词与工作区上下文 —— 便宜且立刻提升可用性，但没工具时 agent 也没事可做，优先级低一些。
+3. Step 6：上下文管理 —— 现在每轮全量重发，长对话迟早出问题，但还很远。
+4. Step 7：会话持久化 —— 独立性强，哪天想脱离终端也行，但不推进核心理解。
