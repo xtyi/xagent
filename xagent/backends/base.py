@@ -42,6 +42,9 @@ class ModelParams:
     model: str
     temperature: float = 0.0
     max_tokens: int = 2048
+    # Thinking-effort level, or None to leave it to the model's default.
+    # The backend decides how this becomes wire fields (see openai_compat).
+    reasoning_effort: str | None = None
 
 
 class Backend(Protocol):

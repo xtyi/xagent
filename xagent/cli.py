@@ -14,7 +14,7 @@ from .agent import Agent
 from .backends.base import Backend, BackendError, ModelParams
 from .backends.mock import MockBackend
 from .backends.openai_compat import OpenAICompatBackend
-from .config import ConfigError, resolve_config
+from .config import REASONING_EFFORTS, ConfigError, resolve_config
 from .messages import Conversation
 from .ui import BOLD, DIM, RESET, Renderer
 
@@ -25,6 +25,7 @@ DEFAULT_SYSTEM_PROMPT = (
 
 HELP_TEXT = """commands:
   /help       show this help
+  /status     show the current session settings
   /reset      drop the conversation history (keeps the system prompt)
   /usage      show token usage of the last turn
   /reasoning  toggle displaying the model's thinking
@@ -42,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--system", help="override the system prompt")
     parser.add_argument("--temperature", type=float)
     parser.add_argument("--max-tokens", type=int)
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=REASONING_EFFORTS,
+        help="thinking effort: `none` disables thinking; else low/medium/high/max",
+    )
     parser.add_argument(
         "--show-reasoning",
         action="store_true",
@@ -61,7 +67,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def build_agent(args: argparse.Namespace, renderer: Renderer) -> Agent:
+def status_fields(
+    model: str, reasoning_effort: str | None, streaming: bool
+) -> list[tuple[str, str]]:
+    """The per-session settings shown in the status line.
+
+    Kept as (key, value) pairs rather than a fixed dataclass so later session
+    settings -- permissions, workspace, ... -- can join the line without
+    reworking the renderer.
+    """
+    return [
+        ("model", model),
+        ("thinking", reasoning_effort or "default"),
+        ("stream", "on" if streaming else "off"),
+    ]
+
+
+def build_agent(
+    args: argparse.Namespace, renderer: Renderer
+) -> tuple[Agent, list[tuple[str, str]]]:
     system_prompt = DEFAULT_SYSTEM_PROMPT if args.system is None else args.system
     conversation = Conversation.with_system_prompt(system_prompt)
 
@@ -70,7 +94,9 @@ def build_agent(args: argparse.Namespace, renderer: Renderer) -> Agent:
         model = args.model or "mock"
         temperature = 0.0 if args.temperature is None else args.temperature
         max_tokens = 256 if args.max_tokens is None else args.max_tokens
-        renderer.note(f"{DIM}[config] backend=mock (offline, no network){RESET}")
+        reasoning_effort = args.reasoning_effort
+        streaming = not args.no_stream
+        renderer.diagnostic(f"{DIM}[config] backend=mock (offline, no network){RESET}")
     else:
         config = resolve_config(
             api_key=args.api_key,
@@ -78,11 +104,13 @@ def build_agent(args: argparse.Namespace, renderer: Renderer) -> Agent:
             model=args.model,
             temperature=args.temperature,
             max_tokens=args.max_tokens,
+            reasoning_effort=args.reasoning_effort,
             streaming=not args.no_stream,
         )
-        renderer.note(
-            f"{DIM}[config] model={config.model} base_url={config.base_url} "
-            f"credential={config.credential_source} stream={config.streaming}{RESET}"
+        # Credentials are out-of-band: stderr, and never the key itself.
+        renderer.diagnostic(
+            f"{DIM}[config] base_url={config.base_url} "
+            f"credential={config.credential_source}{RESET}"
         )
         backend = OpenAICompatBackend(
             config.base_url,
@@ -91,9 +119,16 @@ def build_agent(args: argparse.Namespace, renderer: Renderer) -> Agent:
             streaming=config.streaming,
         )
         model, temperature, max_tokens = config.model, config.temperature, config.max_tokens
+        reasoning_effort, streaming = config.reasoning_effort, config.streaming
 
-    params = ModelParams(model=model, temperature=temperature, max_tokens=max_tokens)
-    return Agent(backend, params, conversation)
+    params = ModelParams(
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        reasoning_effort=reasoning_effort,
+    )
+    agent = Agent(backend, params, conversation)
+    return agent, status_fields(model, reasoning_effort, streaming)
 
 
 def run_turn(agent: Agent, renderer: Renderer, text: str) -> None:
@@ -110,12 +145,16 @@ def run_turn(agent: Agent, renderer: Renderer, text: str) -> None:
     renderer.end_turn()
 
 
-def handle_command(raw: str, agent: Agent, renderer: Renderer) -> str:
+def handle_command(
+    raw: str, agent: Agent, renderer: Renderer, fields: list[tuple[str, str]]
+) -> str:
     command = raw.split()[0].lower()
     if command in ("/exit", "/quit"):
         return "exit"
     if command == "/help":
         renderer.note(HELP_TEXT)
+    elif command == "/status":
+        renderer.status(fields)
     elif command == "/reset":
         agent.conversation.clear()
         renderer.note("history cleared")
@@ -130,7 +169,7 @@ def handle_command(raw: str, agent: Agent, renderer: Renderer) -> str:
     return "continue"
 
 
-def repl(agent: Agent, renderer: Renderer) -> int:
+def repl(agent: Agent, renderer: Renderer, fields: list[tuple[str, str]]) -> int:
     renderer.note(f"{DIM}xagent -- /help for commands, /exit to quit{RESET}")
     while True:
         try:
@@ -142,7 +181,7 @@ def repl(agent: Agent, renderer: Renderer) -> int:
         if not text:
             continue
         if text.startswith("/"):
-            if handle_command(text, agent, renderer) == "exit":
+            if handle_command(text, agent, renderer, fields) == "exit":
                 return 0
             continue
         run_turn(agent, renderer, text)
@@ -152,11 +191,12 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     renderer = Renderer(show_reasoning=args.show_reasoning)
     try:
-        agent = build_agent(args, renderer)
+        agent, fields = build_agent(args, renderer)
     except ConfigError as exc:
         renderer.error(str(exc))
         return 2
+    renderer.status(fields)
     if args.once is not None:
         run_turn(agent, renderer, args.once)
         return 0
-    return repl(agent, renderer)
+    return repl(agent, renderer, fields)

@@ -33,16 +33,39 @@ DEFAULT_MODEL = "deepseek-flash"
 DEFAULT_TEMPERATURE = 0.0
 DEFAULT_MAX_TOKENS = 2048
 DEFAULT_TIMEOUT = 120.0
+# Thinking-effort levels the backend accepts. `none` disables thinking, the
+# rest pick an intensity. Measured against DeepSeek in probes/001.
+REASONING_EFFORTS = ("none", "low", "medium", "high", "max")
+# `None` means "do not send the setting" -- leave it to the model's default.
+DEFAULT_REASONING_EFFORT: str | None = None
 
 ENV_API_KEYS = ("XAGENT_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY")
 ENV_BASE_URL = "XAGENT_BASE_URL"
 ENV_MODEL = "XAGENT_MODEL"
 ENV_PROVIDER = "XAGENT_PROVIDER"
+ENV_REASONING_EFFORT = "XAGENT_REASONING_EFFORT"
 ENV_CONFIG_PATH = "XAGENT_CONFIG"
 
 
 class ConfigError(RuntimeError):
     """Raised when no usable configuration can be assembled."""
+
+
+def check_reasoning_effort(value: str | None, source: str) -> str | None:
+    """Validate one thinking-effort level.
+
+    `None` means "leave it to the model". An unknown level is an error rather
+    than a silent skip: a typo should not turn into an ignored switch.
+    """
+    if value is None:
+        return None
+    level = value.strip().lower()
+    if level not in REASONING_EFFORTS:
+        allowed = ", ".join(REASONING_EFFORTS)
+        raise ConfigError(
+            f"{source}: reasoning_effort must be one of [{allowed}], got {value!r}"
+        )
+    return level
 
 
 @dataclass(frozen=True)
@@ -57,6 +80,7 @@ class ModelConfig:
     timeout: float
     streaming: bool
     credential_source: str
+    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +96,7 @@ class FileConfig:
 
     model_provider: str | None = None
     model: str | None = None
+    reasoning_effort: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
     timeout: float | None = None
@@ -121,6 +146,9 @@ def load_config_file(path: Path = CONFIG_PATH) -> FileConfig:
     config = FileConfig(
         model_provider=data.get("model_provider"),
         model=data.get("model"),
+        reasoning_effort=check_reasoning_effort(
+            data.get("reasoning_effort"), str(path)
+        ),
         temperature=data.get("temperature"),
         max_tokens=data.get("max_tokens"),
         timeout=data.get("timeout"),
@@ -143,6 +171,7 @@ def resolve_config(
     temperature: float | None = None,
     max_tokens: int | None = None,
     timeout: float | None = None,
+    reasoning_effort: str | None = None,
     streaming: bool = True,
     provider: str | None = None,
     config_path: Path | None = None,
@@ -189,6 +218,15 @@ def resolve_config(
             return explicit
         return default if from_file is None else from_file
 
+    effort = reasoning_effort
+    effort_source = "--reasoning-effort"
+    if effort is None:
+        effort = os.environ.get(ENV_REASONING_EFFORT)
+        effort_source = f"env {ENV_REASONING_EFFORT}"
+    if effort is None:
+        effort = file_config.reasoning_effort
+        effort_source = str(path)
+
     return ModelConfig(
         base_url=normalize_base_url(resolved_base),
         api_key=key,
@@ -198,4 +236,5 @@ def resolve_config(
         timeout=pick(timeout, file_config.timeout, DEFAULT_TIMEOUT),
         streaming=streaming,
         credential_source=source,
+        reasoning_effort=check_reasoning_effort(effort, effort_source),
     )

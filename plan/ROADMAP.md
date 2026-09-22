@@ -23,6 +23,21 @@
 - **产出**：`xagent/{config,messages,agent,ui,cli}.py`、`xagent/backends/*`、`tests/*`
 - **学到**：agent 的最小内核其实只是「消息列表 + 一次 HTTP + 一个 while」。
 
+## Step 1b：思考强度与会话状态行 `[x]`
+
+（用户指定的插入 step，编号取 `1b` 以免打乱后面的编号。）
+
+- **目标**：能选思考强度（`none`/`low`/`medium`/`high`/`max`），并把模型、思考强度等
+  会话设置显示在一行 status line 上。
+- **关键点**：
+  - 先用实测定参数（`probes/001`）：选 OpenAI 标准名 `reasoning_effort`，`none` 稳定禁用思考。
+  - 新配置项走统一优先级：CLI flag > 环境变量 > `~/.xagent/config.toml` > 内置默认（默认不发送）。
+  - status line 用 `list[tuple[str, str]]` 表达，给以后的权限控制等留扩展点。
+  - 顺带把「凭据来源」这行挪到 stderr，满足 AGENTS.md 的硬要求。
+- **产出**：`plan/step-01b-thinking-effort.md`、`tests/{test_config,test_openai_compat,test_ui,test_cli}.py`
+- **学到**：一个「开关」功能的复杂度不在开关本身，而在「参数名/取值靠实测定」和
+  「会话设置该以什么形状呈现、往哪扩展」。
+
 ## Step 2：工具调用协议 `[ ]`
 
 - **目标**：模型能调用 `read_file` / `list_dir`，agent 把结果回填后再问一次模型。

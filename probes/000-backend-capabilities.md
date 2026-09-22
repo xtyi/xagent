@@ -17,7 +17,8 @@
 
 - 标准 `data: {...}` 行 + 结尾 `data: [DONE]`。
 - `stream_options: {"include_usage": true}` 生效：最后一个 chunk 带 `usage`。
-- **每个 delta 里多一个 `reasoning_content` 字段**，与 `content` 交替到达：
+- **每个 delta 里多一个 `reasoning_content` 字段**，与 `content` 分成先后两段到达
+  （先一整段 reasoning，再一整段 content；见 `probes/001` §5 的实测与修正）：
 
 ```
 {"role": "assistant", "content": null, "reasoning_content": ""}

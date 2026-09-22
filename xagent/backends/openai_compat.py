@@ -122,6 +122,10 @@ class OpenAICompatBackend:
         if self.streaming:
             # Without this the final chunk carries no token counts.
             payload["stream_options"] = {"include_usage": True}
+        if params.reasoning_effort:
+            # DeepSeek accepts the OpenAI-standard name `reasoning_effort` and
+            # honours `none` as "do not think". Measured in probes/001.
+            payload["reasoning_effort"] = params.reasoning_effort
         return payload
 
     def stream(

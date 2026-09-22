@@ -22,6 +22,9 @@
 
 model_provider = "deepseek"
 model = "deepseek-flash"
+# Thinking effort. `none` disables thinking; other levels pick an intensity.
+# Omit the line to leave it to the model's own default. Measured in probes/001.
+reasoning_effort = "high"
 temperature = 0.0
 max_tokens = 2048
 timeout = 120.0

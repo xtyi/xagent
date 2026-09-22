@@ -27,6 +27,7 @@ AMBIENT_ENV_VARS = (
     "XAGENT_BASE_URL",
     "XAGENT_MODEL",
     "XAGENT_PROVIDER",
+    "XAGENT_REASONING_EFFORT",
     "XAGENT_CONFIG",
     "DEEPSEEK_API_KEY",
     "OPENAI_API_KEY",
@@ -35,6 +36,7 @@ AMBIENT_ENV_VARS = (
 CONFIG_TOML = """\
 model_provider = "deepseek"
 model = "deepseek-flash"
+reasoning_effort = "medium"
 temperature = 0.3
 max_tokens = 128
 timeout = 30.0
@@ -103,6 +105,7 @@ def test_provider_block_is_parsed_and_normalized(config_file):
     file_config = load_config_file(config_file)
 
     assert file_config.model_provider == "deepseek"
+    assert file_config.reasoning_effort == "medium"
     assert file_config.temperature == 0.3
     assert file_config.max_tokens == 128
     assert file_config.timeout == 30.0
@@ -146,6 +149,7 @@ def test_file_supplies_every_setting(clean_env, config_file):
     assert config.api_key == "key-from-file"
     assert config.base_url == "https://api.deepseek.com/v1"
     assert config.model == "deepseek-flash"
+    assert config.reasoning_effort == "medium"
     assert config.temperature == 0.3
     assert config.max_tokens == 128
     assert config.timeout == 30.0
@@ -219,3 +223,51 @@ def test_provider_argument_selects_another_block(clean_env, tmp_path):
 def test_missing_credentials_raise_with_guidance(clean_env, absent_file):
     with pytest.raises(ConfigError, match="no API key found"):
         resolve_config(config_path=absent_file)
+
+
+def test_reasoning_effort_defaults_to_none(clean_env, absent_file):
+    config = resolve_config(api_key="from-flag", config_path=absent_file)
+
+    assert config.reasoning_effort is None
+
+
+def test_reasoning_effort_flag_beats_environment_and_file(
+    clean_env, monkeypatch, config_file
+):
+    monkeypatch.setenv("XAGENT_REASONING_EFFORT", "low")
+
+    config = resolve_config(
+        api_key="from-flag", reasoning_effort="max", config_path=config_file
+    )
+
+    assert config.reasoning_effort == "max"
+
+
+def test_reasoning_effort_environment_beats_file(clean_env, monkeypatch, config_file):
+    monkeypatch.setenv("XAGENT_REASONING_EFFORT", "low")
+
+    config = resolve_config(api_key="from-flag", config_path=config_file)
+
+    assert config.reasoning_effort == "low"
+
+
+def test_reasoning_effort_is_case_insensitive(clean_env, config_file):
+    config = resolve_config(
+        api_key="from-flag", reasoning_effort="HIGH", config_path=config_file
+    )
+
+    assert config.reasoning_effort == "high"
+
+
+@pytest.mark.parametrize("bad", ["off", "disable", "medium-high", "extra"])
+def test_unknown_reasoning_effort_is_loud(clean_env, config_file, bad):
+    with pytest.raises(ConfigError, match="reasoning_effort"):
+        resolve_config(api_key="from-flag", reasoning_effort=bad, config_path=config_file)
+
+
+def test_unknown_reasoning_effort_in_file_is_loud(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('reasoning_effort = "off"\n', encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="reasoning_effort"):
+        load_config_file(path)

@@ -8,7 +8,7 @@ they are two independent streams of tokens (see probes/000).
 from __future__ import annotations
 
 import sys
-from typing import IO, Any
+from typing import IO, Any, Sequence
 
 from .backends.base import StreamEvent
 
@@ -24,8 +24,10 @@ class Renderer:
         show_reasoning: bool = False,
         show_usage: bool = True,
         out: IO[str] | None = None,
+        err: IO[str] | None = None,
     ) -> None:
         self.out = out if out is not None else sys.stdout
+        self.err = err if err is not None else sys.stderr
         self.show_reasoning = show_reasoning
         self.show_usage = show_usage
         self.usage: dict[str, Any] | None = None
@@ -68,6 +70,21 @@ class Renderer:
     def note(self, text: str) -> None:
         self.out.write(text if text.endswith("\n") else text + "\n")
         self.out.flush()
+
+    def status(self, fields: Sequence[tuple[str, str]]) -> None:
+        """One dim line summarising the session: model, thinking, ...
+
+        Takes pairs rather than a fixed shape so later per-session settings
+        (permissions, workspace, ...) can join the line without changing this.
+        """
+        rendered = " ".join(f"{key}={value}" for key, value in fields)
+        self.out.write(f"{DIM}[{rendered}]{RESET}\n")
+        self.out.flush()
+
+    def diagnostic(self, text: str) -> None:
+        """Out-of-band line -- e.g. where credentials came from. Goes to stderr."""
+        self.err.write(text if text.endswith("\n") else text + "\n")
+        self.err.flush()
 
     def error(self, text: str) -> None:
         self.out.write(f"{BOLD}error:{RESET} {text}")
